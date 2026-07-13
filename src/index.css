@@ -1,0 +1,364 @@
+/* ---------- Design tokens ---------- */
+:root {
+  /* Banana-leaf green + turmeric gold, drawn from a South Indian kitchen -
+     not the generic cream/terracotta AI palette. */
+  --green-deep: #2F5233;    /* curry-leaf green - primary actions, headings */
+  --green-deep-dark: #223d27;
+  --green-pale: #EEF3E4;    /* soft banana-leaf background */
+  --gold: #D9A017;          /* turmeric - selection / highlight accent */
+  --gold-dark: #B3820F;
+  --ink: #2B2318;           /* warm dark text, not pure black */
+  --card: #FFFEF9;          /* warm ivory card surface */
+  --border: #E1E0CF;
+  --muted: #756D5C;
+  --danger: #B3261E;
+  --danger-bg: #FBEAE9;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--green-pale);
+  background-image: radial-gradient(circle at 1px 1px, rgba(47, 82, 51, 0.06) 1px, transparent 0);
+  background-size: 22px 22px;
+  color: var(--ink);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.screen {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 32px 12px;
+}
+
+/* ---------- Card ---------- */
+.card {
+  background: var(--card);
+  border-radius: 20px;
+  padding: 0 24px 24px;
+  width: 100%;
+  max-width: 420px;
+  height: fit-content;
+  box-shadow: 0 12px 32px rgba(43, 35, 24, 0.10);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.card.wide { max-width: 540px; }
+
+/* Kolam strip: the signature detail - a row of dots evoking the rice-flour
+   patterns drawn at a doorstep each morning to welcome the household. */
+.card::before {
+  content: '';
+  display: block;
+  height: 14px;
+  margin: 0 -24px 20px;
+  background-color: var(--green-deep);
+  background-image: repeating-radial-gradient(
+    circle at 10px 7px,
+    var(--gold) 0 2.2px,
+    transparent 3px 20px
+  );
+}
+
+h1 {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 600;
+  font-size: 1.6rem;
+  margin: 0 0 4px;
+  color: var(--green-deep);
+  letter-spacing: -0.01em;
+}
+
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hello {
+  color: var(--gold-dark);
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.muted { color: var(--muted); }
+.small { font-size: 0.8rem; }
+
+.error {
+  background: var(--danger-bg);
+  color: var(--danger);
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 0.85rem;
+  border: 1px solid rgba(179, 38, 30, 0.15);
+}
+
+.small-error {
+  margin-top: -4px;
+  margin-bottom: 12px;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+}
+
+/* ---------- Forms & inputs ---------- */
+.add-form {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.input {
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 1rem;
+  flex: 1;
+  background: white;
+  color: var(--ink);
+  font-family: 'Noto Sans Tamil', 'Inter', sans-serif;
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--gold);
+  box-shadow: 0 0 0 3px rgba(217, 160, 23, 0.18);
+}
+
+.name-input { flex: 3; }
+.qty-input { flex: 1; min-width: 60px; }
+
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  transition: background 0.15s ease, transform 0.05s ease;
+}
+
+.btn-primary {
+  background: var(--green-deep);
+  color: white;
+}
+.btn-primary:hover { background: var(--green-deep-dark); }
+.btn-primary:active { transform: scale(0.98); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.btn-icon {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 1rem;
+  padding: 4px 8px;
+}
+.btn-icon:hover { color: var(--danger); }
+
+.btn-block {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ---------- Section headers ---------- */
+.section-title {
+  font-family: 'Fraunces', Georgia, serif;
+  font-weight: 600;
+  font-size: 1.05rem;
+  margin: 20px 0 10px;
+  color: var(--green-deep);
+}
+
+.section-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* ---------- Item grid (tap-to-select tiles) ---------- */
+.item-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+  max-height: 340px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.item-tile {
+  width: 100%;
+  border: 1.5px solid var(--border);
+  background: white;
+  color: var(--ink);
+  border-radius: 12px;
+  padding: 14px 16px;
+  font-size: 1rem;
+  font-family: 'Noto Sans Tamil', 'Inter', sans-serif;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-align: left;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+.item-tile:hover {
+  border-color: var(--gold);
+}
+
+.item-tile:active {
+  transform: scale(0.99);
+}
+
+.item-tile-selected {
+  background: var(--gold);
+  border-color: var(--gold);
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.tile-label {
+  flex: 1;
+}
+
+.tile-check {
+  font-weight: bold;
+  width: 20px;
+  text-align: right;
+  color: var(--green-deep);
+}
+
+/* ---------- Lists ---------- */
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  gap: 8px;
+}
+
+.item-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  cursor: pointer;
+}
+
+.item-main input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--gold-dark);
+}
+
+.item-name {
+  font-size: 1rem;
+  font-family: 'Noto Sans Tamil', 'Inter', sans-serif;
+}
+.item-name.strike { text-decoration: line-through; color: var(--muted); }
+
+.item-qty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  background: var(--green-pale);
+  padding: 2px 8px;
+  border-radius: 6px;
+}
+
+.item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.item.bought { opacity: 0.65; }
+
+.qty-input-inline {
+  width: 70px;
+  padding: 6px 8px;
+  font-size: 0.9rem;
+}
+
+.unit-select {
+  width: 78px;
+  padding: 6px 4px;
+  font-size: 0.85rem;
+  background: white;
+}
+
+.footer {
+  margin-top: 22px;
+  text-align: center;
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--green-deep);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 0;
+  font-weight: 600;
+}
+
+@media (max-width: 420px) {
+  .card, .card.wide {
+    padding: 0 16px 16px;
+    border-radius: 16px;
+  }
+
+  .card::before {
+    margin: 0 -16px 16px;
+  }
+
+  .screen {
+    padding: 12px 8px;
+  }
+
+  .add-form {
+    flex-wrap: wrap;
+  }
+
+  .name-input {
+    flex: 1 1 100%;
+  }
+
+  .qty-input {
+    flex: 1;
+  }
+
+  .item-tile {
+    padding: 12px 14px;
+    font-size: 0.95rem;
+  }
+}

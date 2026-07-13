@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# environment variables - contains your real Firebase keys, never commit this
+.env
+.env.local
+
+# firebase
+.firebase/
+firebase-debug.log
+firestore-debug.log
+
+# editor
+.vscode/*
+!.vscode/extensions.json
+
+# OS
+.DS_Store
+Thumbs.db

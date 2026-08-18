@@ -2,13 +2,15 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Since there's no login, anyone with the app link can read/write
-    // this one collection. Everything else stays locked down.
     match /groceryItems/{itemId} {
       allow read, write: if true;
     }
 
     match /customTiles/{tileId} {
+      allow read, write: if true;
+    }
+
+    match /purchaseHistory/{tripId} {
       allow read, write: if true;
     }
 

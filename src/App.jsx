@@ -12,7 +12,7 @@ import {
   writeBatch,
 } from 'firebase/firestore'
 import { db } from './firebase'
-import { COMMON_ITEMS } from './items'
+import { COMMON_ITEMS, CATEGORIES } from './items'
 
 // Everyone who opens this app with the same link shares ONE list.
 // There is no login - your name is just a label stored on this device
@@ -23,7 +23,69 @@ const ITEMS_COLLECTION = 'groceryItems'
 // permanent tiles for the whole family - no code changes needed.
 const CUSTOM_TILES_COLLECTION = 'customTiles'
 
+// Each completed shopping trip gets logged here: what was actually bought,
+// what wasn't found in the store, and when.
+const PURCHASE_HISTORY_COLLECTION = 'purchaseHistory'
+
 const UNIT_OPTIONS = ['nos', 'kg', 'litres']
+const OTHER_CATEGORY = { id: 'other', label: 'மற்றவை', icon: '🛒' }
+
+// A single collator covering both Tamil and English forces every comparison
+// through one script's rules, which produces inconsistent results for mixed
+// lists. Instead: split by script (based on the name's first character),
+// sort each group with its own proper collation, English group first.
+const enCollator = new Intl.Collator('en', { sensitivity: 'base', numeric: true })
+const taCollator = new Intl.Collator('ta', { sensitivity: 'base', numeric: true })
+const TAMIL_RANGE = /[\u0B80-\u0BFF]/
+
+function sortMixedByName(list, getName = (x) => x) {
+  const english = []
+  const tamil = []
+  list.forEach((item) => {
+    const name = (getName(item) || '').trim()
+    if (TAMIL_RANGE.test(name[0] || '')) tamil.push(item)
+    else english.push(item)
+  })
+  english.sort((a, b) => enCollator.compare(getName(a), getName(b)))
+  tamil.sort((a, b) => taCollator.compare(getName(a), getName(b)))
+  return [...english, ...tamil]
+}
+
+// Custom items typed via "Not on the list?" don't come with a category, so
+// we guess one from keywords in the name (checked as substrings, not just
+// prefix/suffix, and case-insensitive for English). When a name matches
+// keywords from more than one category, the longer/more specific keyword
+// wins - e.g. "gram flour" matches "flour" (5 letters) which beats a
+// shorter, less specific match, so it correctly lands in flour, not dal.
+const CATEGORY_KEYWORDS = {
+  pooja: ['சாம்பிராணி', 'சந்தனம்', 'குங்குமம்', 'ஊதுபத்தி', 'sambrani', 'sandalwood', 'kumkum', 'agarbatti', 'incense'],
+  masala: ['மிளகாய்', 'மசாலா', 'மிளகு', 'சீரகம்', 'சோம்பு', 'பட்டை', 'லவுங்கம்', 'chilli', 'pepper', 'cumin', 'fennel', 'masala', 'curry powder', 'cinnamon', 'cloves'],
+  dal: ['பருப்பு', 'கடலை', 'dal', 'lentil', 'pulse', 'chickpea'],
+  rice: ['அரிசி', 'தானியம்', 'தானியங்கள்', 'rice', 'millet'],
+  flour: ['மாவு', 'ரவை', 'சேமியா', 'flour', 'rava', 'semiya', 'vermicelli', 'atta', 'maida', 'besan'],
+  salt_sugar: ['உப்பு', 'சர்க்கரை', 'salt', 'sugar'],
+  oil: ['எண்ணெய்', 'oil'],
+  dairy: ['நெய்', 'பால்', 'ghee', 'milk', 'butter', 'curd'],
+  beverages: ['தேநீர்', 'டீதூள்', 'காபி', 'tea', 'coffee', 'பானம்'],
+  snacks: ['பிஸ்கட்', 'மேகி', 'அப்பளம்', 'biscuit', 'maggi', 'chocolate', 'candy', 'chips', 'appalam', 'papad'],
+  produce: ['பழம்', 'கிழங்கு', 'காய்கறி', 'வெங்காயம்', 'பூண்டு', 'fruit', 'vegetable', 'potato', 'onion', 'tomato', 'garlic'],
+  household: ['பேஸ்ட்', 'சோப்பு', 'சோப்', 'ஷாம்பு', 'அமிர்தான்சன்', 'toothpaste', 'soap', 'shampoo', 'detergent', 'turmeric cream', 'balm'],
+}
+
+function guessCategory(name) {
+  const lower = (name || '').toLowerCase()
+  let best = null
+  let bestLen = 0
+  for (const [catId, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
+    for (const kw of keywords) {
+      if (lower.includes(kw.toLowerCase()) && kw.length > bestLen) {
+        best = catId
+        bestLen = kw.length
+      }
+    }
+  }
+  return best
+}
 
 function useName() {
   const [name, setName] = useState(() => localStorage.getItem('grocery_name') || '')
@@ -52,21 +114,6 @@ function combineQty(amount, unit) {
   return `${trimmedAmount} ${unit}`
 }
 
-// Tries to split a stored qty string like "2 kg" back into amount + unit,
-// so existing items can still be edited sensibly.
-function splitQty(qtyString) {
-  const trimmed = (qtyString || '').trim()
-  if (!trimmed) return { amount: '', unit: UNIT_OPTIONS[0] }
-  const match = trimmed.match(/^([\d.]+)\s*(kg|litres|nos)?$/i)
-  if (match) {
-    const unit = (match[2] || UNIT_OPTIONS[0]).toLowerCase()
-    return { amount: match[1], unit: UNIT_OPTIONS.includes(unit) ? unit : UNIT_OPTIONS[0] }
-  }
-  // Doesn't match the amount+unit pattern (e.g. old free-text qty) - keep it
-  // as-is in the amount box so nothing gets silently lost.
-  return { amount: trimmed, unit: UNIT_OPTIONS[0] }
-}
-
 export default function App() {
   const [name, setName] = useName()
   const [items, setItems] = useState(null) // null = loading, shared Firestore items
@@ -76,6 +123,9 @@ export default function App() {
   const [customError, setCustomError] = useState('')
   const [error, setError] = useState('')
   const [finalizing, setFinalizing] = useState(false)
+  const [completingTrip, setCompletingTrip] = useState(false)
+  const [page, setPage] = useState('home') // 'home' | 'checkout' | 'history' - which screen is showing
+  const [history, setHistory] = useState(null) // null = not loaded yet
 
   useEffect(() => {
     const q = query(collection(db, ITEMS_COLLECTION), orderBy('createdAt', 'asc'))
@@ -101,16 +151,88 @@ export default function App() {
     return unsub
   }, [])
 
-  // The full set of tiles shown in the grid: hardcoded items.js + anything
-  // added by anyone through the "Not on the list?" box.
-  const allTiles = useMemo(() => {
-    const hardcodedNames = COMMON_ITEMS.map((i) => i.ta)
-    const extra = customTiles.filter((tileName) => !hardcodedNames.includes(tileName))
-    return [...hardcodedNames, ...extra]
+  // Only listen to purchase history while that page is actually open -
+  // no need to keep reading it in the background otherwise.
+  useEffect(() => {
+    if (page !== 'history') return
+    const q = query(collection(db, PURCHASE_HISTORY_COLLECTION), orderBy('completedAt', 'desc'))
+    const unsub = onSnapshot(
+      q,
+      (snap) => setHistory(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (err) => {
+        console.error(err)
+        setError('Could not load buy history.')
+      }
+    )
+    return unsub
+  }, [page])
+
+  // Hardcoded items already carry a category + icon. Custom items typed via
+  // the UI get a best-guess category from guessCategory() - only ones that
+  // don't match any keywords fall into the "Other" bucket at the end.
+  const groupedTiles = useMemo(() => {
+    const hardcodedNames = new Set(COMMON_ITEMS.map((i) => i.ta))
+    const extraNames = customTiles.filter((tileName) => !hardcodedNames.has(tileName))
+
+    const groups = CATEGORIES.map((cat) => {
+      const hardcodedTiles = COMMON_ITEMS.filter((i) => i.category === cat.id)
+      const customForCat = sortMixedByName(
+        extraNames.filter((tileName) => guessCategory(tileName) === cat.id)
+      ).map((tileName) => ({ ta: tileName, icon: cat.icon }))
+      return { ...cat, tiles: [...hardcodedTiles, ...customForCat] }
+    }).filter((g) => g.tiles.length > 0)
+
+    const uncategorized = sortMixedByName(
+      extraNames.filter((tileName) => !guessCategory(tileName))
+    )
+    if (uncategorized.length > 0) {
+      groups.push({
+        ...OTHER_CATEGORY,
+        tiles: uncategorized.map((tileName) => ({ ta: tileName, icon: OTHER_CATEGORY.icon })),
+      })
+    }
+    return groups
   }, [customTiles])
+
+  const allTileNames = useMemo(
+    () => groupedTiles.flatMap((g) => g.tiles.map((t) => t.ta)),
+    [groupedTiles]
+  )
+
+  // Maps an item name back to its category id, so items already saved in
+  // Firebase (which only store the name) can still be grouped visually.
+  // Hardcoded names use their known category; anything else (custom items)
+  // falls back to the same keyword guess used for the tile grid.
+  const categoryByName = useMemo(() => {
+    const map = new Map()
+    COMMON_ITEMS.forEach((i) => map.set(i.ta, i.category))
+    return map
+  }, [])
+
+  function resolveCategory(itemName) {
+    return categoryByName.get(itemName) || guessCategory(itemName) || OTHER_CATEGORY.id
+  }
+
+  function groupByCategory(list) {
+    const byCategory = new Map()
+    list.forEach((item) => {
+      const catId = resolveCategory(item.name)
+      if (!byCategory.has(catId)) byCategory.set(catId, [])
+      byCategory.get(catId).push(item)
+    })
+    const orderedGroups = [...CATEGORIES, OTHER_CATEGORY]
+      .map((cat) => ({
+        ...cat,
+        entries: sortMixedByName(byCategory.get(cat.id) || [], (item) => item.name),
+      }))
+      .filter((g) => g.entries.length > 0)
+    return orderedGroups
+  }
 
   const pending = useMemo(() => (items || []).filter((i) => !i.bought), [items])
   const bought = useMemo(() => (items || []).filter((i) => i.bought), [items])
+  const pendingGroups = useMemo(() => groupByCategory(pending), [pending, categoryByName])
+  const boughtGroups = useMemo(() => groupByCategory(bought), [bought, categoryByName])
 
   // Names currently in your draft (so we know which grid tiles to show as "selected")
   const draftNames = useMemo(() => new Set(draftItems.map((d) => d.name)), [draftItems])
@@ -142,9 +264,7 @@ export default function App() {
     ])
     setCustomText('')
 
-    // If this exact name isn't already a tile, save it so it shows up
-    // as a permanent tile for the whole family from now on.
-    if (!allTiles.includes(trimmed)) {
+    if (!allTileNames.includes(trimmed)) {
       try {
         await addDoc(collection(db, CUSTOM_TILES_COLLECTION), {
           name: trimmed,
@@ -153,7 +273,6 @@ export default function App() {
         })
       } catch (err) {
         console.error(err)
-        // Not a big deal if this fails - the item is still in the draft list either way.
       }
     }
   }
@@ -166,9 +285,6 @@ export default function App() {
     setDraftItems((prev) => prev.filter((d) => d.id !== id))
   }
 
-  // This is the only place that writes to Firebase for new items now.
-  // Items you tap in the grid first sit in your local draft above,
-  // and only get pushed here once you tap "Move to buy list".
   async function finalizeList() {
     if (!draftItems.length || finalizing) return
     setFinalizing(true)
@@ -186,6 +302,7 @@ export default function App() {
       })
       await batch.commit()
       setDraftItems([])
+      setPage('checkout')
     } catch (err) {
       console.error(err)
       setError('Could not save the list to Firebase. Check your connection.')
@@ -201,10 +318,6 @@ export default function App() {
     })
   }
 
-  async function updateItemQty(id, qty) {
-    await updateDoc(doc(db, ITEMS_COLLECTION, id), { qty })
-  }
-
   async function removeItem(id) {
     await deleteDoc(doc(db, ITEMS_COLLECTION, id))
   }
@@ -214,6 +327,37 @@ export default function App() {
     const batch = writeBatch(db)
     bought.forEach((item) => batch.delete(doc(db, ITEMS_COLLECTION, item.id)))
     await batch.commit()
+  }
+
+  // Ends the shopping trip: checked items are logged as bought, anything
+  // still unchecked is logged as "not available in store" - then the whole
+  // active list clears out so the next trip starts fresh.
+  async function completeTrip() {
+    if (!items || !items.length || completingTrip) return
+    const confirmed = window.confirm(
+      `Mark this trip complete?\n\n${bought.length} item(s) bought, ${pending.length} item(s) not available.\nThis clears the current list.`
+    )
+    if (!confirmed) return
+
+    setCompletingTrip(true)
+    try {
+      await addDoc(collection(db, PURCHASE_HISTORY_COLLECTION), {
+        completedAt: serverTimestamp(),
+        completedBy: name || 'Someone',
+        purchased: bought.map((i) => ({ name: i.name, qty: i.qty || '' })),
+        unavailable: pending.map((i) => ({ name: i.name, qty: i.qty || '' })),
+      })
+
+      const batch = writeBatch(db)
+      items.forEach((item) => batch.delete(doc(db, ITEMS_COLLECTION, item.id)))
+      await batch.commit()
+      setPage('home')
+    } catch (err) {
+      console.error(err)
+      setError('Could not complete the trip. Check your connection and try again.')
+    } finally {
+      setCompletingTrip(false)
+    }
   }
 
   if (!name) {
@@ -232,17 +376,120 @@ export default function App() {
     <div className="screen">
       <div className="card wide">
         <header className="header">
-          <h1>🛒 Family Grocery List</h1>
-          <span className="hello">Hi, {name}</span>
+          <div className="header-top">
+            <h1>🛒 Family Grocery List</h1>
+            <span className="hello">Hi, {name}</span>
+          </div>
+          <nav className="nav-tabs">
+            {page !== 'home' && (
+              <button className="nav-btn" onClick={() => setPage('home')}>
+                <span className="nav-btn-icon">←</span> Add items
+              </button>
+            )}
+            {page !== 'checkout' && (
+              <button className="nav-btn" onClick={() => setPage('checkout')}>
+                <span className="nav-btn-icon">🛒</span> Buy list
+                {items && items.length > 0 ? <span className="nav-btn-badge">{items.length}</span> : null}
+              </button>
+            )}
+            {page !== 'history' && (
+              <button className="nav-btn" onClick={() => setPage('history')}>
+                <span className="nav-btn-icon">🕘</span> History
+              </button>
+            )}
+          </nav>
         </header>
 
         {error && <p className="error">{error}</p>}
 
+        {page === 'history' ? (
+          <HistoryView history={history} />
+        ) : page === 'checkout' ? (
+          <>
+          {items === null ? (
+            <p className="muted">Loading shared list…</p>
+          ) : (
+            <>
+              <section>
+                <h2 className="section-title">To buy ({pending.length})</h2>
+                {pending.length === 0 && <p className="muted">Nothing pending. Nice!</p>}
+                {pendingGroups.map((group) => (
+                  <details key={group.id} className="category-block" open>
+                    <summary className="category-heading">
+                      <span>{group.icon}</span> {group.label}
+                      <span className="category-count">({group.entries.length})</span>
+                    </summary>
+                    <ul className="list">
+                      {group.entries.map((item) => (
+                        <li key={item.id} className="item">
+                          <label className="item-main">
+                            <input type="checkbox" checked={false} onChange={() => toggleBought(item)} />
+                            <span className="item-name">{item.name}</span>
+                          </label>
+                          <div className="item-meta">
+                            {item.qty && <span className="item-qty">{item.qty}</span>}
+                            <span className="muted small">added by {item.addedBy}</span>
+                            <button className="btn-icon" onClick={() => removeItem(item.id)} aria-label="Delete">✕</button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ))}
+              </section>
+
+              {bought.length > 0 && (
+                <section>
+                  <div className="section-title-row">
+                    <h2 className="section-title">Bought ({bought.length})</h2>
+                    <button className="btn btn-ghost" onClick={clearBought}>Clear bought</button>
+                  </div>
+                  {boughtGroups.map((group) => (
+                    <details key={group.id} className="category-block">
+                      <summary className="category-heading">
+                        <span>{group.icon}</span> {group.label}
+                        <span className="category-count">({group.entries.length})</span>
+                      </summary>
+                      <ul className="list">
+                        {group.entries.map((item) => (
+                          <li key={item.id} className="item bought">
+                            <label className="item-main">
+                              <input type="checkbox" checked={true} onChange={() => toggleBought(item)} />
+                              <span className="item-name strike">{item.name}</span>
+                              {item.qty && <span className="item-qty">{item.qty}</span>}
+                            </label>
+                            <div className="item-meta">
+                              <span className="muted small">by {item.boughtBy || item.addedBy}</span>
+                              <button className="btn-icon" onClick={() => removeItem(item.id)} aria-label="Delete">✕</button>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  ))}
+                </section>
+              )}
+
+              {items.length === 0 && (
+                <p className="muted">Nothing in the buy list yet. Add items from the list page.</p>
+              )}
+
+              {items.length > 0 && (
+                <button
+                  className="btn btn-primary btn-block checkout-btn"
+                  onClick={completeTrip}
+                  disabled={completingTrip}
+                >
+                  {completingTrip ? 'Saving trip…' : '✅ Purchase completed'}
+                </button>
+              )}
+            </>
+          )}
+          </>
+        ) : (
+        <>
         <section>
-          <form
-            className="add-form"
-            onSubmit={addCustomItem}
-          >
+          <form className="add-form" onSubmit={addCustomItem}>
             <input
               className="input name-input"
               placeholder="Not on the list? Type it here…"
@@ -259,22 +506,32 @@ export default function App() {
           {customError && <p className="error small-error">{customError}</p>}
 
           <h2 className="section-title">Tap items to select</h2>
-          <div className="item-grid">
-            {allTiles.map((tileName) => {
-              const selected = draftNames.has(tileName)
-              return (
-                <button
-                  key={tileName}
-                  type="button"
-                  className={selected ? 'item-tile item-tile-selected' : 'item-tile'}
-                  onClick={() => toggleItem(tileName)}
-                >
-                  <span className="tile-label">{tileName}</span>
-                  <span className="tile-check">{selected ? '✓' : ''}</span>
-                </button>
-              )
-            })}
-          </div>
+
+          {groupedTiles.map((group) => (
+            <details key={group.id} className="category-block">
+              <summary className="category-heading">
+                <span>{group.icon}</span> {group.label}
+                <span className="category-count">({group.tiles.length})</span>
+              </summary>
+              <div className="item-grid">
+                {group.tiles.map((tile) => {
+                  const selected = draftNames.has(tile.ta)
+                  return (
+                    <button
+                      key={tile.ta}
+                      type="button"
+                      className={selected ? 'item-tile item-tile-selected' : 'item-tile'}
+                      onClick={() => toggleItem(tile.ta)}
+                    >
+                      <span className="tile-icon">{tile.icon}</span>
+                      <span className="tile-label">{tile.ta}</span>
+                      <span className="tile-check">{selected ? '✓' : ''}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </details>
+          ))}
         </section>
 
         <section>
@@ -318,64 +575,13 @@ export default function App() {
           )}
           <button
             className="btn btn-primary btn-block"
-            onClick={finalizeList}
-            disabled={!draftItems.length || finalizing}
+            onClick={() => (draftItems.length ? finalizeList() : setPage('checkout'))}
+            disabled={finalizing}
           >
-            {finalizing ? 'Saving…' : 'Move to buy list'}
+            {finalizing ? 'Saving…' : 'Proceed to checkout'}
           </button>
         </section>
-
-        {items === null ? (
-          <p className="muted">Loading shared list…</p>
-        ) : (
-          <>
-            <section>
-              <h2 className="section-title">To buy ({pending.length})</h2>
-              {pending.length === 0 && <p className="muted">Nothing pending. Nice!</p>}
-              <ul className="list">
-                {pending.map((item) => (
-                  <li key={item.id} className="item">
-                    <label className="item-main">
-                      <input type="checkbox" checked={false} onChange={() => toggleBought(item)} />
-                      <span className="item-name">{item.name}</span>
-                    </label>
-                    <div className="item-meta">
-                      <QtyEditor
-                        qty={item.qty}
-                        onCommit={(newQty) => updateItemQty(item.id, newQty)}
-                      />
-                      <span className="muted small">added by {item.addedBy}</span>
-                      <button className="btn-icon" onClick={() => removeItem(item.id)} aria-label="Delete">✕</button>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            {bought.length > 0 && (
-              <section>
-                <div className="section-title-row">
-                  <h2 className="section-title">Bought ({bought.length})</h2>
-                  <button className="btn btn-ghost" onClick={clearBought}>Clear bought</button>
-                </div>
-                <ul className="list">
-                  {bought.map((item) => (
-                    <li key={item.id} className="item bought">
-                      <label className="item-main">
-                        <input type="checkbox" checked={true} onChange={() => toggleBought(item)} />
-                        <span className="item-name strike">{item.name}</span>
-                        {item.qty && <span className="item-qty">{item.qty}</span>}
-                      </label>
-                      <div className="item-meta">
-                        <span className="muted small">by {item.boughtBy || item.addedBy}</span>
-                        <button className="btn-icon" onClick={() => removeItem(item.id)} aria-label="Delete">✕</button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </section>
-            )}
-          </>
+        </>
         )}
 
         <footer className="footer">
@@ -388,42 +594,66 @@ export default function App() {
   )
 }
 
-function QtyEditor({ qty, onCommit }) {
-  const initial = splitQty(qty)
-  const [amount, setAmount] = useState(initial.amount)
-  const [unit, setUnit] = useState(initial.unit)
-
-  function commit(newAmount, newUnit) {
-    const combined = combineQty(newAmount, newUnit)
-    if (combined !== (qty || '')) onCommit(combined)
+function HistoryView({ history }) {
+  if (history === null) {
+    return <p className="muted">Loading buy history…</p>
+  }
+  if (history.length === 0) {
+    return <p className="muted">No completed trips yet. Once you tap "Purchase completed," trips show up here.</p>
   }
 
   return (
-    <>
-      <input
-        className="input qty-input-inline"
-        placeholder="Qty"
-        inputMode="decimal"
-        value={amount}
-        onChange={(e) => setAmount(e.target.value)}
-        onBlur={() => commit(amount, unit)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') e.target.blur()
-        }}
-      />
-      <select
-        className="input unit-select"
-        value={unit}
-        onChange={(e) => {
-          setUnit(e.target.value)
-          commit(amount, e.target.value)
-        }}
-      >
-        {UNIT_OPTIONS.map((u) => (
-          <option key={u} value={u}>{u}</option>
-        ))}
-      </select>
-    </>
+    <section>
+      {history.map((trip) => {
+        const when = trip.completedAt?.toDate
+          ? trip.completedAt.toDate().toLocaleString(undefined, {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+            })
+          : 'Just now'
+        return (
+          <details key={trip.id} className="category-block">
+            <summary className="category-heading">
+              <span>🧾</span> {when}
+              <span className="category-count">by {trip.completedBy}</span>
+            </summary>
+            <div className="history-trip">
+              <div className="history-group">
+                <p className="muted small history-label">✅ Bought ({trip.purchased.length})</p>
+                {trip.purchased.length === 0 ? (
+                  <p className="muted small">Nothing bought this trip.</p>
+                ) : (
+                  <ul className="list">
+                    {trip.purchased.map((item, i) => (
+                      <li key={i} className="item">
+                        <span className="item-name">{item.name}</span>
+                        {item.qty && <span className="item-qty">{item.qty}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              {trip.unavailable.length > 0 && (
+                <div className="history-group">
+                  <p className="muted small history-label">❌ Not available ({trip.unavailable.length})</p>
+                  <ul className="list">
+                    {trip.unavailable.map((item, i) => (
+                      <li key={i} className="item">
+                        <span className="item-name">{item.name}</span>
+                        {item.qty && <span className="item-qty">{item.qty}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          </details>
+        )
+      })}
+    </section>
   )
 }
 

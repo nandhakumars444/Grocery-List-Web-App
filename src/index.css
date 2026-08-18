@@ -1,18 +1,20 @@
 /* ---------- Design tokens ---------- */
+/* Madras check - the hand-loom plaid that takes its name from this city.
+   Indigo, mustard and brick red, the way the checks are traditionally woven -
+   replaces the earlier banana-leaf green theme. Variable names kept as-is
+   so the rest of this file didn't need touching, just the values. */
 :root {
-  /* Banana-leaf green + turmeric gold, drawn from a South Indian kitchen -
-     not the generic cream/terracotta AI palette. */
-  --green-deep: #2F5233;    /* curry-leaf green - primary actions, headings */
-  --green-deep-dark: #223d27;
-  --green-pale: #EEF3E4;    /* soft banana-leaf background */
-  --gold: #D9A017;          /* turmeric - selection / highlight accent */
-  --gold-dark: #B3820F;
-  --ink: #2B2318;           /* warm dark text, not pure black */
-  --card: #FFFEF9;          /* warm ivory card surface */
-  --border: #E1E0CF;
-  --muted: #756D5C;
-  --danger: #B3261E;
-  --danger-bg: #FBEAE9;
+  --green-deep: #2C3E66;    /* indigo - headings, primary buttons */
+  --green-deep-dark: #1F2C4A;
+  --green-pale: #FBEFD7;    /* warm mustard-tinted page background */
+  --gold: #E3A72B;          /* mustard - selection / highlight accent */
+  --gold-dark: #BF8815;
+  --ink: #26232B;
+  --card: #FFFDF9;
+  --border: #E4DCC8;
+  --muted: #746B58;
+  --danger: #B5442E;        /* brick red - doubles as the third check colour */
+  --danger-bg: #F7E7E2;
 }
 
 * { box-sizing: border-box; }
@@ -20,8 +22,11 @@
 body {
   margin: 0;
   background: var(--green-pale);
-  background-image: radial-gradient(circle at 1px 1px, rgba(47, 82, 51, 0.06) 1px, transparent 0);
-  background-size: 22px 22px;
+  /* Faint plaid/check grid instead of a dot pattern - two overlapping
+     stripe sets in indigo and mustard, echoing the fabric's weave. */
+  background-image:
+    repeating-linear-gradient(90deg, rgba(44, 62, 102, 0.05) 0 2px, transparent 2px 42px),
+    repeating-linear-gradient(0deg, rgba(227, 167, 43, 0.06) 0 2px, transparent 2px 42px);
   color: var(--ink);
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
@@ -33,7 +38,6 @@ body {
   padding: 32px 12px;
 }
 
-/* ---------- Card ---------- */
 .card {
   background: var(--card);
   border-radius: 20px;
@@ -41,27 +45,29 @@ body {
   width: 100%;
   max-width: 420px;
   height: fit-content;
-  box-shadow: 0 12px 32px rgba(43, 35, 24, 0.10);
+  box-shadow: 0 12px 32px rgba(38, 35, 43, 0.12);
   border: 1px solid var(--border);
   overflow: hidden;
 }
 
 .card.wide { max-width: 540px; }
 
-/* Kolam strip: the signature detail - a row of dots evoking the rice-flour
-   patterns drawn at a doorstep each morning to welcome the household. */
+/* Signature detail: a woven-border stripe, like the coloured trim along
+   the edge of a veshti or saree, instead of the earlier kolam dots. */
 .card::before {
   content: '';
   display: block;
-  height: 14px;
+  height: 12px;
   margin: 0 -24px 20px;
-  background-color: var(--green-deep);
-  background-image: repeating-radial-gradient(
-    circle at 10px 7px,
-    var(--gold) 0 2.2px,
-    transparent 3px 20px
+  background-image: repeating-linear-gradient(
+    90deg,
+    var(--green-deep) 0 8px,
+    var(--gold) 8px 12px,
+    var(--danger) 12px 14px,
+    var(--card) 14px 16px
   );
 }
+
 
 h1 {
   font-family: 'Fraunces', Georgia, serif;
@@ -73,18 +79,68 @@ h1 {
 }
 
 .header {
+  margin-bottom: 20px;
+}
+
+.header-top {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  margin-bottom: 18px;
+  gap: 8px;
+  margin-bottom: 12px;
   flex-wrap: wrap;
-  gap: 4px;
 }
 
 .hello {
   color: var(--gold-dark);
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+.nav-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1.5px solid var(--border);
+  background: white;
+  color: var(--green-deep);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
+}
+
+.nav-btn:hover {
+  border-color: var(--green-deep);
+  background: var(--green-pale);
+}
+
+.nav-btn:active {
+  transform: scale(0.97);
+}
+
+.nav-btn-icon {
+  font-size: 0.95rem;
+  line-height: 1;
+}
+
+.nav-btn-badge {
+  background: var(--gold);
+  color: var(--ink);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 999px;
+  line-height: 1.5;
 }
 
 .muted { color: var(--muted); }
@@ -106,7 +162,6 @@ h1 {
   padding: 6px 10px;
 }
 
-/* ---------- Forms & inputs ---------- */
 .add-form {
   display: flex;
   gap: 8px;
@@ -179,7 +234,6 @@ h1 {
   cursor: not-allowed;
 }
 
-/* ---------- Section headers ---------- */
 .section-title {
   font-family: 'Fraunces', Georgia, serif;
   font-weight: 600;
@@ -194,15 +248,70 @@ h1 {
   justify-content: space-between;
 }
 
+/* ---------- Category grouping (collapsible dropdowns) ---------- */
+.category-block {
+  margin-bottom: 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: white;
+}
+
+.category-heading {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--gold-dark);
+  letter-spacing: 0.02em;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  background: var(--green-pale);
+}
+
+.category-heading::-webkit-details-marker {
+  display: none;
+}
+
+.category-heading::after {
+  content: '▾';
+  margin-left: auto;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+
+.category-block[open] > .category-heading::after {
+  transform: rotate(180deg);
+}
+
+.category-count {
+  color: var(--muted);
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.category-block .item-grid,
+.category-block > ul.list {
+  padding: 10px 12px;
+}
+
+.category-block > ul.list {
+  margin: 0;
+}
+
+.category-block > ul.list .item:last-child {
+  border-bottom: none;
+}
+
 /* ---------- Item grid (tap-to-select tiles) ---------- */
 .item-grid {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-bottom: 8px;
-  max-height: 340px;
-  overflow-y: auto;
-  padding-right: 2px;
 }
 
 .item-tile {
@@ -211,13 +320,13 @@ h1 {
   background: white;
   color: var(--ink);
   border-radius: 12px;
-  padding: 14px 16px;
+  padding: 12px 16px;
   font-size: 1rem;
   font-family: 'Noto Sans Tamil', 'Inter', sans-serif;
   cursor: pointer;
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 10px;
   text-align: left;
   transition: background 0.15s ease, border-color 0.15s ease, transform 0.05s ease;
 }
@@ -237,15 +346,22 @@ h1 {
   font-weight: 600;
 }
 
+.tile-icon {
+  font-size: 1.3rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 .tile-label {
   flex: 1;
 }
 
 .tile-check {
   font-weight: bold;
-  width: 20px;
+  width: 18px;
   text-align: right;
   color: var(--green-deep);
+  flex-shrink: 0;
 }
 
 /* ---------- Lists ---------- */
@@ -331,6 +447,31 @@ h1 {
   font-weight: 600;
 }
 
+.checkout-btn {
+  margin-top: 18px;
+  font-size: 1.05rem;
+  padding: 14px 16px;
+  background: var(--gold-dark);
+}
+
+.checkout-btn:hover {
+  background: var(--gold-dark);
+  filter: brightness(0.92);
+}
+
+.history-trip {
+  padding: 4px 12px 10px;
+}
+
+.history-group {
+  margin-bottom: 10px;
+}
+
+.history-label {
+  margin: 4px 0 4px;
+  font-weight: 600;
+}
+
 @media (max-width: 420px) {
   .card, .card.wide {
     padding: 0 16px 16px;
@@ -358,7 +499,7 @@ h1 {
   }
 
   .item-tile {
-    padding: 12px 14px;
+    padding: 11px 14px;
     font-size: 0.95rem;
   }
 }

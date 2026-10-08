@@ -1,5 +1,6 @@
 import { initializeApp } from 'firebase/app'
 import { getFirestore } from 'firebase/firestore'
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from 'firebase/app-check'
 
 // These values come from your Firebase project settings.
 // Create a file named `.env` in the project root (see .env.example)
@@ -13,5 +14,21 @@ const firebaseConfig = {
   appId: import.meta.env.VITE_FIREBASE_APP_ID,
 }
 
-const app = initializeApp(firebaseConfig)
+export const app = initializeApp(firebaseConfig)
+
+// App Check (needed for Firebase AI Logic). Skipped if no site key is set,
+// so the app still runs without it.
+const siteKey = import.meta.env.VITE_RECAPTCHA_SITE_KEY
+if (siteKey) {
+  // On localhost the browser console prints a debug token. Register it in
+  // Firebase console -> App Check -> Apps -> Manage debug tokens.
+  if (location.hostname === 'localhost') {
+    self.FIREBASE_APPCHECK_DEBUG_TOKEN = true
+  }
+  initializeAppCheck(app, {
+    provider: new ReCaptchaEnterpriseProvider(siteKey),
+    isTokenAutoRefreshEnabled: true,
+  })
+}
+
 export const db = getFirestore(app)

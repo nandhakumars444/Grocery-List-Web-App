@@ -24,6 +24,7 @@ export const CATEGORIES = [
   { id: 'salt_sugar', label: 'உப்பு & சர்க்கரை', icon: '🧂' },
   { id: 'oil', label: 'எண்ணெய்', icon: '🛢️' },
   { id: 'dairy', label: 'பால் பொருட்கள்', icon: '🧈' },
+  { id: 'meat', label: 'இறைச்சி & முட்டை', icon: '🍗' },
   { id: 'beverages', label: 'பானங்கள்', icon: '☕' },
   { id: 'snacks', label: 'சிற்றுண்டி', icon: '🍪' },
   { id: 'produce', label: 'பழம் & காய்கறி', icon: '🥔' },

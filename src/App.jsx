@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   collection,
   addDoc,
@@ -13,6 +13,7 @@ import {
 } from 'firebase/firestore'
 import { db } from './firebase'
 import { COMMON_ITEMS, CATEGORIES } from './items'
+import { guessCategory } from './categorize'
 
 // Everyone who opens this app with the same link shares ONE list.
 // There is no login - your name is just a label stored on this device
@@ -27,7 +28,7 @@ const CUSTOM_TILES_COLLECTION = 'customTiles'
 // what wasn't found in the store, and when.
 const PURCHASE_HISTORY_COLLECTION = 'purchaseHistory'
 
-const UNIT_OPTIONS = ['nos', 'kg', 'litres']
+const UNIT_OPTIONS = ['nos', 'kg','gram', 'litres']
 const OTHER_CATEGORY = { id: 'other', label: 'மற்றவை', icon: '🛒' }
 
 // A single collator covering both Tamil and English forces every comparison
@@ -49,42 +50,6 @@ function sortMixedByName(list, getName = (x) => x) {
   english.sort((a, b) => enCollator.compare(getName(a), getName(b)))
   tamil.sort((a, b) => taCollator.compare(getName(a), getName(b)))
   return [...english, ...tamil]
-}
-
-// Custom items typed via "Not on the list?" don't come with a category, so
-// we guess one from keywords in the name (checked as substrings, not just
-// prefix/suffix, and case-insensitive for English). When a name matches
-// keywords from more than one category, the longer/more specific keyword
-// wins - e.g. "gram flour" matches "flour" (5 letters) which beats a
-// shorter, less specific match, so it correctly lands in flour, not dal.
-const CATEGORY_KEYWORDS = {
-  pooja: ['சாம்பிராணி', 'சந்தனம்', 'குங்குமம்', 'ஊதுபத்தி', 'sambrani', 'sandalwood', 'kumkum', 'agarbatti', 'incense'],
-  masala: ['மிளகாய்', 'மசாலா', 'மிளகு', 'சீரகம்', 'சோம்பு', 'பட்டை', 'லவுங்கம்', 'chilli', 'pepper', 'cumin', 'fennel', 'masala', 'curry powder', 'cinnamon', 'cloves'],
-  dal: ['பருப்பு', 'கடலை', 'dal', 'lentil', 'pulse', 'chickpea'],
-  rice: ['அரிசி', 'தானியம்', 'தானியங்கள்', 'rice', 'millet'],
-  flour: ['மாவு', 'ரவை', 'சேமியா', 'flour', 'rava', 'semiya', 'vermicelli', 'atta', 'maida', 'besan'],
-  salt_sugar: ['உப்பு', 'சர்க்கரை', 'salt', 'sugar'],
-  oil: ['எண்ணெய்', 'oil'],
-  dairy: ['நெய்', 'பால்', 'ghee', 'milk', 'butter', 'curd'],
-  beverages: ['தேநீர்', 'டீதூள்', 'காபி', 'tea', 'coffee', 'பானம்'],
-  snacks: ['பிஸ்கட்', 'மேகி', 'அப்பளம்', 'biscuit', 'maggi', 'chocolate', 'candy', 'chips', 'appalam', 'papad'],
-  produce: ['பழம்', 'கிழங்கு', 'காய்கறி', 'வெங்காயம்', 'பூண்டு', 'fruit', 'vegetable', 'potato', 'onion', 'tomato', 'garlic'],
-  household: ['பேஸ்ட்', 'சோப்பு', 'சோப்', 'ஷாம்பு', 'அமிர்தான்சன்', 'toothpaste', 'soap', 'shampoo', 'detergent', 'turmeric cream', 'balm'],
-}
-
-function guessCategory(name) {
-  const lower = (name || '').toLowerCase()
-  let best = null
-  let bestLen = 0
-  for (const [catId, keywords] of Object.entries(CATEGORY_KEYWORDS)) {
-    for (const kw of keywords) {
-      if (lower.includes(kw.toLowerCase()) && kw.length > bestLen) {
-        best = catId
-        bestLen = kw.length
-      }
-    }
-  }
-  return best
 }
 
 function useName() {
@@ -146,7 +111,13 @@ export default function App() {
   useEffect(() => {
     const q = query(collection(db, CUSTOM_TILES_COLLECTION), orderBy('name', 'asc'))
     const unsub = onSnapshot(q, (snap) => {
-      setCustomTiles(snap.docs.map((d) => d.data().name))
+      setCustomTiles(
+        snap.docs.map((d) => ({
+          id: d.id,
+          name: d.data().name,
+          category: d.data().category || null, // saved once the AI (or keywords) decided
+        }))
+      )
     })
     return unsub
   }, [])
@@ -167,28 +138,69 @@ export default function App() {
     return unsub
   }, [page])
 
-  // Hardcoded items already carry a category + icon. Custom items typed via
-  // the UI get a best-guess category from guessCategory() - only ones that
-  // don't match any keywords fall into the "Other" bucket at the end.
+  // AI fallback: when the keyword method can't place a custom tile, ask the
+  // Gemini model once (via Firebase AI Logic) and save the answer on the tile,
+  // so every device reuses it and the AI is never asked about it again.
+  // If the AI call fails (offline, quota, App Check), the item just stays in
+  // "Other" - nothing breaks.
+  const aiTried = useRef(new Set())
+
+  async function classifyWithAI(tileId, tileName) {
+    if (aiTried.current.has(tileId)) return
+    aiTried.current.add(tileId)
+    try {
+      const { aiGuessCategory } = await import('./aiCategory')
+      const category = await aiGuessCategory(tileName)
+      if (category) {
+        await updateDoc(doc(db, CUSTOM_TILES_COLLECTION, tileId), { category })
+      }
+    } catch (err) {
+      console.error('AI category failed for', tileName, err)
+    }
+  }
+
+  useEffect(() => {
+    const hardcodedNames = new Set(COMMON_ITEMS.map((i) => i.ta))
+    customTiles
+      .filter(
+        (t) =>
+          !t.category &&
+          !hardcodedNames.has(t.name) &&
+          !guessCategory(t.name) &&
+          !aiTried.current.has(t.id)
+      )
+      .slice(0, 3) // a few at a time, the next batch runs after these are saved
+      .forEach((t) => classifyWithAI(t.id, t.name))
+  }, [customTiles])
+
+  // Hardcoded items already carry a category + icon. Custom items use the
+  // category saved on their tile (set by the AI fallback), otherwise a
+  // keyword guess. Only ones with no answer fall into the "Other" bucket.
   const groupedTiles = useMemo(() => {
     const hardcodedNames = new Set(COMMON_ITEMS.map((i) => i.ta))
-    const extraNames = customTiles.filter((tileName) => !hardcodedNames.has(tileName))
+    const extra = customTiles.filter((t) => !hardcodedNames.has(t.name))
+    const catOf = (t) => t.category || guessCategory(t.name)
 
     const groups = CATEGORIES.map((cat) => {
       const hardcodedTiles = COMMON_ITEMS.filter((i) => i.category === cat.id)
       const customForCat = sortMixedByName(
-        extraNames.filter((tileName) => guessCategory(tileName) === cat.id)
-      ).map((tileName) => ({ ta: tileName, icon: cat.icon }))
+        extra.filter((t) => catOf(t) === cat.id),
+        (t) => t.name
+      ).map((t) => ({ ta: t.name, icon: cat.icon }))
       return { ...cat, tiles: [...hardcodedTiles, ...customForCat] }
     }).filter((g) => g.tiles.length > 0)
 
     const uncategorized = sortMixedByName(
-      extraNames.filter((tileName) => !guessCategory(tileName))
+      extra.filter((t) => {
+        const c = catOf(t)
+        return !c || !CATEGORIES.some((cat) => cat.id === c)
+      }),
+      (t) => t.name
     )
     if (uncategorized.length > 0) {
       groups.push({
         ...OTHER_CATEGORY,
-        tiles: uncategorized.map((tileName) => ({ ta: tileName, icon: OTHER_CATEGORY.icon })),
+        tiles: uncategorized.map((t) => ({ ta: t.name, icon: OTHER_CATEGORY.icon })),
       })
     }
     return groups
@@ -205,9 +217,13 @@ export default function App() {
   // falls back to the same keyword guess used for the tile grid.
   const categoryByName = useMemo(() => {
     const map = new Map()
+    customTiles.forEach((t) => {
+      const c = t.category || guessCategory(t.name)
+      if (c && c !== OTHER_CATEGORY.id) map.set(t.name, c)
+    })
     COMMON_ITEMS.forEach((i) => map.set(i.ta, i.category))
     return map
-  }, [])
+  }, [customTiles])
 
   function resolveCategory(itemName) {
     return categoryByName.get(itemName) || guessCategory(itemName) || OTHER_CATEGORY.id
